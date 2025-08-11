@@ -3,7 +3,7 @@ from app.categorizer import get_category_counts_from_file
 from app.data_loader import get_available_dates, load_reviews_data
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -15,24 +15,39 @@ app = Flask(__name__)
 def index():
     """Main page with the reviews interface"""
     # Get available dates
-    dates = get_available_dates()
+    all_dates = get_available_dates()
     
-    # Default to the first date if available
-    selected_date = request.args.get('date')
-    if not selected_date and dates:
-        selected_date = dates[0]
+    # Get date range for August 1-9, 2025
+    target_dates = []
+    for i in range(1, 10):  # August 1-9
+        date_str = f"2025-08-0{i}" if i < 10 else f"2025-08-{i}"
+        if date_str in all_dates:
+            target_dates.append(date_str)
     
-    # Get category counts for the selected date
-    category_counts = {}
-    if selected_date:
-        result = load_reviews_data(selected_date)
+    # If no target dates found, use available dates
+    if not target_dates and all_dates:
+        target_dates = all_dates[:9]  # Use up to 9 dates
+    
+    # Get category counts for all dates in the range
+    categories = set()
+    date_category_counts = {}
+    
+    for date in target_dates:
+        result = load_reviews_data(date)
         if result:
-            category_counts, _ = result
+            counts, _ = result
+            date_category_counts[date] = counts
+            # Collect all unique categories
+            categories.update(counts.keys())
+    
+    # Convert to a sorted list of categories
+    categories_list = sorted(list(categories))
     
     return render_template('index.html', 
-                          dates=dates, 
-                          selected_date=selected_date,
-                          category_counts=category_counts)
+                          all_dates=all_dates,
+                          target_dates=target_dates,
+                          categories=categories_list,
+                          date_category_counts=date_category_counts)
 
 @app.route('/api/reviews/<date>')
 def get_reviews(date):

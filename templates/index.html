@@ -143,39 +143,26 @@
     <div class="container">
         <h1 class="text-center">InsiteGent - Swiggy Reviews Analysis</h1>
         
-        <div class="date-selector">
-            <form id="dateForm" method="get" action="/">
-                <div class="row">
-                    <div class="col-md-6">
-                        <label for="date" class="form-label">Select Date:</label>
-                        <select name="date" id="date" class="form-select" onchange="this.form.submit()">
-                            {% for date in dates %}
-                                <option value="{{ date }}" {% if date == selected_date %}selected{% endif %}>{{ date }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-            </form>
-        </div>
-        
         <div id="loadingIndicator" class="loading-indicator">
             <div class="spinner"></div>
             <p>Processing reviews... This may take a moment.</p>
         </div>
         
         <div class="result-container">
-            {% if category_counts %}
-                <h2>Review Categories for {{ selected_date }}</h2>
+            {% if categories and target_dates %}
+                <h2>Review Categories by Date (August 1-9, 2025)</h2>
                 <div class="table-responsive">
                     <table class="table table-bordered table-hover">
                         <thead class="header-row">
                             <tr>
                                 <th>Category</th>
-                                <th>Count</th>
+                                {% for date in target_dates %}
+                                    <th>{{ date[8:] }}/{{ date[5:7] }}</th> <!-- Display as DD/MM format -->
+                                {% endfor %}
                             </tr>
                         </thead>
                         <tbody>
-                            {% for category, count in category_counts.items() %}
+                            {% for category in categories %}
                                 {% set row_class = "" %}
                                 {% if category == "Positive Feedback" %}
                                     {% set row_class = "positive" %}
@@ -187,7 +174,15 @@
                                 
                                 <tr class="category-row {{ row_class }}">
                                     <td>{{ category }}</td>
-                                    <td class="count-cell" data-category="{{ category }}" data-date="{{ selected_date }}">{{ count }}</td>
+                                    {% for date in target_dates %}
+                                        <td class="count-cell" data-category="{{ category }}" data-date="{{ date }}">
+                                            {% if date in date_category_counts and category in date_category_counts[date] %}
+                                                {{ date_category_counts[date][category] }}
+                                            {% else %}
+                                                0
+                                            {% endif %}
+                                        </td>
+                                    {% endfor %}
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -195,7 +190,7 @@
                 </div>
             {% else %}
                 <div class="alert alert-warning">
-                    No review data available for {{ selected_date }}
+                    No review data available
                 </div>
             {% endif %}
         </div>
@@ -218,9 +213,13 @@
             const countCells = document.querySelectorAll('.count-cell');
             countCells.forEach(cell => {
                 cell.addEventListener('click', function() {
-                    const category = this.getAttribute('data-category');
-                    const date = this.getAttribute('data-date');
-                    showReviews(category, date);
+                    // Only show reviews if count is not zero
+                    const count = parseInt(this.textContent.trim());
+                    if (count > 0) {
+                        const category = this.getAttribute('data-category');
+                        const date = this.getAttribute('data-date');
+                        showReviews(category, date);
+                    }
                 });
             });
             
@@ -235,11 +234,6 @@
                 if (event.target === modal) {
                     modal.style.display = 'none';
                 }
-            });
-            
-            // Show loading indicator when form is submitted
-            document.getElementById('dateForm').addEventListener('submit', function() {
-                document.getElementById('loadingIndicator').style.display = 'block';
             });
         });
         
