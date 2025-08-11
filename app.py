@@ -1,54 +1,59 @@
-#use the scrapper to scrape the reviews of the app and show it in the interface in html css file ijdex.html
-
-from app.scrapper import scrape_reviews
 from flask import Flask, render_template, request, jsonify
+from app.categorizer import get_category_counts_from_file
+from app.data_loader import get_available_dates, load_reviews_data
+import os
+import pandas as pd
+from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     """Main page with the reviews interface"""
-    return render_template('index.html')
+    # Get available dates
+    dates = get_available_dates()
+    
+    # Default to the first date if available
+    selected_date = request.args.get('date')
+    if not selected_date and dates:
+        selected_date = dates[0]
+    
+    # Get category counts for the selected date
+    category_counts = {}
+    if selected_date:
+        category_counts = load_reviews_data(selected_date)
+    
+    return render_template('index.html', 
+                          dates=dates, 
+                          selected_date=selected_date,
+                          category_counts=category_counts)
 
-@app.route('/fetch_reviews')
-def fetch_reviews():
-    """API endpoint to fetch reviews for a specific app"""
-    app_id = request.args.get('app_id')
-    count = int(request.args.get('count', 10))
+@app.route('/api/reviews/<date>')
+def get_reviews(date):
+    """API endpoint to get reviews for a specific date"""
+    category_counts = load_reviews_data(date)
     
-    if not app_id:
-        return jsonify({
-            'status': 'error',
-            'message': 'Missing app_id parameter'
-        }), 400
-    
-    if count < 1 or count > 200:
-        return jsonify({
-            'status': 'error',
-            'message': 'Count must be between 1 and 200'
-        }), 400
-    
-    try:
-        # Scrape reviews using the scrapper
-        reviews = scrape_reviews(app_id, count)
-        
+    if category_counts:
         return jsonify({
             'status': 'success',
-            'message': f'Successfully fetched {len(reviews)} reviews',
-            'app_id': app_id,
-            'reviews': reviews
+            'date': date,
+            'categories': category_counts
         })
-    
-    except Exception as e:
+    else:
         return jsonify({
             'status': 'error',
-            'message': f'Error fetching reviews: {str(e)}',
-            'app_id': app_id
-        }), 500
+            'message': f'No data available for {date}'
+        }), 404
 
 if __name__ == '__main__':
+    # Create templates directory if it doesn't exist
+    os.makedirs('templates', exist_ok=True)
+    
     app.run(debug=True)
-
 
 
 
