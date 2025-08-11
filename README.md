@@ -1,6 +1,6 @@
 # InsiteGent - Swiggy Reviews Analyzer
 
-An AI-powered web application that categorizes and analyzes Swiggy app reviews using vector embeddings and semantic search.
+An AI-powered web application that categorizes and analyzes Swiggy app reviews using vector embeddings and semantic search with LLM fallback.
 
 ## Features
 
@@ -9,6 +9,8 @@ An AI-powered web application that categorizes and analyzes Swiggy app reviews u
 - Use OpenAI embeddings for advanced semantic matching
 - Dynamically create new categories using LLM when needed
 - Display category summary with counts in a simple web interface
+- View detailed reviews by clicking on category counts
+- Provide feedback on categorization accuracy to improve the system
 - Fallback to pattern matching if vector search fails
 - Store reviews in date-wise CSV files for historical analysis
 
@@ -76,12 +78,21 @@ The system starts with these predefined categories:
 ## Technical Architecture
 
 The project is organized into modular components:
-- `app/embedding_utils.py`: Handles OpenAI embeddings
-- `app/vector_store.py`: Implements FAISS vector store
-- `app/llm_categorizer.py`: Handles LLM-based categorization
-- `app/categorizer.py`: Main categorization logic
-- `app/data_loader.py`: Loads and manages review data
-- `app.py`: Flask web application
+- `app/embedding_utils.py`: Handles OpenAI embeddings for semantic understanding
+- `app/vector_store.py`: Implements FAISS vector store for efficient similarity search
+- `app/llm_categorizer.py`: Handles LLM-based categorization for reviews that don't match existing categories
+- `app/categorizer.py`: Main categorization logic integrating all components
+- `app/data_loader.py`: Loads and manages review data from CSV files
+- `app.py`: Flask web application with REST API endpoints
+- `templates/index.html`: Interactive UI with review visualization and feedback mechanisms
+
+### Categorization Process Flow:
+1. Load reviews from CSV files
+2. Generate embeddings using OpenAI API
+3. Compare with predefined category examples using FAISS similarity search
+4. For reviews that don't match well (below threshold), use LLM to suggest categories
+5. Provide results with interactive UI for exploration and feedback
+6. Collect user feedback to continuously improve categorization
 
 ## Dependencies
 

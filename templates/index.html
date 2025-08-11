@@ -49,6 +49,94 @@
         .neutral {
             background-color: #fff3cd;
         }
+        .count-cell {
+            cursor: pointer;
+            color: #0d6efd;
+            text-decoration: underline;
+        }
+        
+        /* Modal styles */
+        .review-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 10% auto;
+            padding: 20px;
+            width: 70%;
+            max-width: 800px;
+            border-radius: 8px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .close-button {
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .review-item {
+            border-bottom: 1px solid #dee2e6;
+            padding: 15px 0;
+        }
+        .review-content {
+            font-size: 15px;
+            margin-bottom: 8px;
+        }
+        .review-meta {
+            font-size: 13px;
+            color: #6c757d;
+        }
+        .stars {
+            color: #ffc107;
+            margin-right: 5px;
+        }
+        .feedback-controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        .feedback-btn {
+            padding: 3px 8px;
+            font-size: 12px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .correct-btn {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .incorrect-btn {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .loading-indicator {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -68,6 +156,11 @@
                     </div>
                 </div>
             </form>
+        </div>
+        
+        <div id="loadingIndicator" class="loading-indicator">
+            <div class="spinner"></div>
+            <p>Processing reviews... This may take a moment.</p>
         </div>
         
         <div class="result-container">
@@ -94,7 +187,7 @@
                                 
                                 <tr class="category-row {{ row_class }}">
                                     <td>{{ category }}</td>
-                                    <td>{{ count }}</td>
+                                    <td class="count-cell" data-category="{{ category }}" data-date="{{ selected_date }}">{{ count }}</td>
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -107,7 +200,197 @@
             {% endif %}
         </div>
     </div>
+    
+    <!-- Review Modal -->
+    <div id="reviewModal" class="review-modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h3 id="modalTitle">Reviews</h3>
+            <div id="reviewContainer"></div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Set up click handlers for count cells
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add click handlers to count cells
+            const countCells = document.querySelectorAll('.count-cell');
+            countCells.forEach(cell => {
+                cell.addEventListener('click', function() {
+                    const category = this.getAttribute('data-category');
+                    const date = this.getAttribute('data-date');
+                    showReviews(category, date);
+                });
+            });
+            
+            // Set up modal close button
+            document.querySelector('.close-button').addEventListener('click', function() {
+                document.getElementById('reviewModal').style.display = 'none';
+            });
+            
+            // Close modal when clicking outside
+            window.addEventListener('click', function(event) {
+                const modal = document.getElementById('reviewModal');
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+            
+            // Show loading indicator when form is submitted
+            document.getElementById('dateForm').addEventListener('submit', function() {
+                document.getElementById('loadingIndicator').style.display = 'block';
+            });
+        });
+        
+        // Function to show reviews for a category
+        function showReviews(category, date) {
+            // Show loading inside modal
+            document.getElementById('modalTitle').textContent = `Loading ${category} Reviews...`;
+            document.getElementById('reviewContainer').innerHTML = '<div class="spinner"></div><p>Loading reviews...</p>';
+            document.getElementById('reviewModal').style.display = 'block';
+            
+            fetch('/get_category_reviews', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    category: category,
+                    date: date
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'error') {
+                    alert(data.message);
+                    return;
+                }
+                
+                // Set modal title
+                document.getElementById('modalTitle').textContent = `${category} Reviews (${data.reviews.length})`;
+                
+                // Clear previous reviews
+                const container = document.getElementById('reviewContainer');
+                container.innerHTML = '';
+                
+                // Add reviews to container
+                if (data.reviews.length === 0) {
+                    container.innerHTML = '<p>No reviews found for this category.</p>';
+                } else {
+                    data.reviews.forEach(review => {
+                        const reviewElement = document.createElement('div');
+                        reviewElement.className = 'review-item';
+                        
+                        // Generate stars based on score
+                        let stars = '';
+                        const score = parseInt(review.score) || 0;
+                        for (let i = 0; i < 5; i++) {
+                            if (i < score) {
+                                stars += '★';  // Filled star
+                            } else {
+                                stars += '☆';  // Empty star
+                            }
+                        }
+                        
+                        reviewElement.innerHTML = `
+                            <div class="review-content">${review.content}</div>
+                            <div class="review-meta">
+                                <span class="stars">${stars}</span>
+                                <span>by ${review.userName || 'Anonymous'}</span>
+                                <span>at ${formatDate(review.at)}</span>
+                            </div>
+                            <div class="feedback-controls">
+                                <span>Is this categorization:</span>
+                                <button class="feedback-btn correct-btn" onclick="recordFeedback('${category}', '${review.content.replace(/'/g, "\\'")}', true)">Correct</button>
+                                <button class="feedback-btn incorrect-btn" onclick="recordFeedback('${category}', '${review.content.replace(/'/g, "\\'")}', false)">Incorrect</button>
+                            </div>
+                        `;
+                        
+                        container.appendChild(reviewElement);
+                    });
+                }
+                
+                // Show the modal
+                document.getElementById('reviewModal').style.display = 'block';
+            })
+            .catch(error => {
+                console.error('Error fetching reviews:', error);
+                alert('Failed to fetch reviews. Please try again later.');
+            });
+        }
+        
+        // Helper function to format date
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleString();
+            } catch (e) {
+                return dateStr;
+            }
+        }
+        
+        // Function to record categorization feedback
+        function recordFeedback(category, reviewText, isCorrect) {
+            const feedback = {
+                category: category,
+                reviewText: reviewText,
+                isCorrect: isCorrect,
+                timestamp: new Date().toISOString()
+            };
+            
+            // If incorrect, prompt for suggested category
+            if (!isCorrect) {
+                const suggestedCategory = prompt("What would be the correct category for this review?");
+                if (suggestedCategory) {
+                    feedback.suggestedCategory = suggestedCategory;
+                }
+            }
+            
+            // Send feedback to server
+            fetch('/submit_feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(feedback)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Store in local storage as backup
+                    let storedFeedback = localStorage.getItem('categorization_feedback');
+                    let feedbackArray = storedFeedback ? JSON.parse(storedFeedback) : [];
+                    feedbackArray.push(feedback);
+                    localStorage.setItem('categorization_feedback', JSON.stringify(feedbackArray));
+                    
+                    // Show confirmation
+                    alert(isCorrect ? 
+                        "Thank you! Feedback recorded as correct categorization." : 
+                        "Thank you! Feedback recorded as incorrect categorization. This will help improve future categorizations.");
+                } else {
+                    alert("Error recording feedback: " + (data.message || "Unknown error"));
+                }
+            })
+            .catch(error => {
+                console.error('Error submitting feedback:', error);
+                alert("Error submitting feedback. Your feedback was saved locally.");
+                
+                // Save to local storage as backup
+                let storedFeedback = localStorage.getItem('categorization_feedback');
+                let feedbackArray = storedFeedback ? JSON.parse(storedFeedback) : [];
+                feedbackArray.push(feedback);
+                localStorage.setItem('categorization_feedback', JSON.stringify(feedbackArray));
+            });
+            
+            // In a production system, you would send this feedback to the server
+            // to improve the categorization system over time
+            
+            // Example of how to use this feedback to improve the system:
+            // 1. For correct categorizations, strengthen the vector store with this example
+            // 2. For incorrect categorizations, update thresholds or add examples to other categories
+        }
+    </script>
 </body>
 </html>

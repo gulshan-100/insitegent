@@ -30,11 +30,16 @@ def get_available_dates(reviews_dir='swiggy_reviews'):
         return []
 
 def load_reviews_data(date, reviews_dir='swiggy_reviews'):
-    """Load reviews data for a specific date"""
+    """
+    Load reviews data for a specific date
+    
+    Returns:
+        Tuple of (category_counts, categorized_reviews) or None if file doesn't exist
+    """
     file_path = os.path.join(reviews_dir, f"{date}.csv")
     if not os.path.exists(file_path):
         return None
     
-    # Get category counts
-    category_counts = get_category_counts_from_file(file_path)
-    return category_counts
+    # Get category counts and categorized reviews
+    counts, categorized_reviews = get_category_counts_from_file(file_path)
+    return counts, categorized_reviews
