@@ -37,10 +37,13 @@ An AI-powered web application that categorizes and analyzes Swiggy app reviews u
 
 ### Review Analysis
 1. Navigate to the home page
-2. Select a date from the dropdown menu
+2. View the analysis for the July 24 - August 9, 2025 date range
 3. The app will display a summary of categories with counts
-4. Categories are color-coded (positive in green, negative in red, neutral in yellow)
-5. CSV files are stored in the `swiggy_reviews/` folder
+4. **Click on any count** to view the specific reviews in that category
+5. Categories are color-coded (positive in green, negative in red, neutral in yellow)
+6. **Click the Export button** to download the complete table as CSV
+7. **Click on export buttons in review modals** to download specific category reviews
+8. CSV files are stored in the `output/` folder for further analysis
 
 ## Categorization Process
 
@@ -54,16 +57,27 @@ The app uses a three-level categorization approach:
 2. **LLM-based Categorization (Secondary)**:
    - For reviews that don't match any existing category well
    - Uses OpenAI to suggest new categories based on content
-   - Dynamically expands the category list
+   - **Dynamically creates and persists new categories** as needed
+   - Consolidates similar topics to avoid redundancy
 
 3. **Pattern-based Matching (Fallback)**:
    - Uses regular expressions for keyword matching
    - Works without API calls if vector search fails
    - Ensures the system always produces results
 
+## Dynamic Category Creation
+
+The system intelligently identifies when new categories are needed:
+
+- Starts with seed categories but evolves based on review content
+- Uses GPT models to identify emerging themes and topics
+- Persists new categories in `data/dynamic_categories.json`
+- Consolidates similar topics to avoid redundant categories (e.g., "Delivery partner rude" and "Delivery person impolite")
+- Applies newly created categories to future reviews
+
 ## Predefined Categories
 
-The system starts with these predefined categories:
+The system starts with these seed categories:
 - Delivery issue
 - Food stale
 - Delivery partner rude
@@ -72,8 +86,8 @@ The system starts with these predefined categories:
 - Bring back 10 minute bolt delivery
 - App issues
 - High Charges/Fees
+- Payment issues
 - Positive Feedback
-- Other
 
 ## Technical Architecture
 
@@ -81,6 +95,7 @@ The project is organized into modular components:
 - `app/embedding_utils.py`: Handles OpenAI embeddings for semantic understanding
 - `app/vector_store.py`: Implements FAISS vector store for efficient similarity search
 - `app/llm_categorizer.py`: Handles LLM-based categorization for reviews that don't match existing categories
+- `app/dynamic_category_manager.py`: Manages the creation and persistence of new categories
 - `app/categorizer.py`: Main categorization logic integrating all components
 - `app/data_loader.py`: Loads and manages review data from CSV files
 - `app.py`: Flask web application with REST API endpoints
@@ -89,10 +104,11 @@ The project is organized into modular components:
 ### Categorization Process Flow:
 1. Load reviews from CSV files
 2. Generate embeddings using OpenAI API
-3. Compare with predefined category examples using FAISS similarity search
+3. Compare with predefined and dynamic categories using FAISS similarity search
 4. For reviews that don't match well (below threshold), use LLM to suggest categories
-5. Provide results with interactive UI for exploration and feedback
-6. Collect user feedback to continuously improve categorization
+5. Create new categories when needed and save them for future use
+6. Provide results with interactive UI for exploration and feedback
+7. Collect user feedback to continuously improve categorization
 
 ## Dependencies
 

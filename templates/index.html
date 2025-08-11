@@ -143,6 +143,16 @@
     <div class="container">
         <h1 class="text-center">InsiteGent - Swiggy Reviews Analysis</h1>
         
+        <div class="d-flex justify-content-end mb-3">
+            <a href="/export_to_csv" class="btn btn-success" role="button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-excel me-2" viewBox="0 0 16 16">
+                    <path d="M5.884 6.68a.5.5 0 1 0-.768.64L7.349 10l-2.233 2.68a.5.5 0 0 0 .768.64L8 10.781l2.116 2.54a.5.5 0 0 0 .768-.641L8.651 10l2.233-2.68a.5.5 0 0 0-.768-.64L8 9.219l-2.116-2.54z"/>
+                    <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/>
+                </svg>
+                Export to CSV
+            </a>
+        </div>
+        
         <div id="loadingIndicator" class="loading-indicator">
             <div class="spinner"></div>
             <p>Processing reviews... This may take a moment.</p>
@@ -150,7 +160,7 @@
         
         <div class="result-container">
             {% if categories and target_dates %}
-                <h2>Review Categories by Date (August 1-9, 2025)</h2>
+                <h2>Review Categories by Date (July 24 - August 9, 2025)</h2>
                 <div class="table-responsive">
                     <table class="table table-bordered table-hover">
                         <thead class="header-row">
@@ -200,7 +210,16 @@
     <div id="reviewModal" class="review-modal">
         <div class="modal-content">
             <span class="close-button">&times;</span>
-            <h3 id="modalTitle">Reviews</h3>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 id="modalTitle">Reviews</h3>
+                <button id="exportCategoryButton" class="btn btn-outline-success btn-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-excel me-1" viewBox="0 0 16 16">
+                        <path d="M5.884 6.68a.5.5 0 1 0-.768.64L7.349 10l-2.233 2.68a.5.5 0 0 0 .768.64L8 10.781l2.116 2.54a.5.5 0 0 0 .768-.641L8.651 10l2.233-2.68a.5.5 0 0 0-.768-.64L8 9.219l-2.116-2.54z"/>
+                        <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/>
+                    </svg>
+                    Export Category Data
+                </button>
+            </div>
             <div id="reviewContainer"></div>
         </div>
     </div>
@@ -235,10 +254,72 @@
                     modal.style.display = 'none';
                 }
             });
+            
+            // Set up export category button
+            document.getElementById('exportCategoryButton').addEventListener('click', function() {
+                if (currentCategory && currentDate) {
+                    exportCategoryData(currentCategory, currentDate);
+                }
+            });
         });
+        
+        // Function to export category data
+        function exportCategoryData(category, date) {
+            // Show loading state
+            const exportBtn = document.getElementById('exportCategoryButton');
+            const originalText = exportBtn.innerHTML;
+            exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Exporting...';
+            exportBtn.disabled = true;
+            
+            fetch('/export_category_reviews', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    category: category,
+                    date: date
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'error') {
+                    alert(data.message);
+                    return;
+                }
+                
+                // Create a temporary link and click it to download the file
+                const link = document.createElement('a');
+                link.href = data.download_url;
+                link.download = data.filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Restore button state
+                exportBtn.innerHTML = originalText;
+                exportBtn.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error exporting data:', error);
+                alert('Failed to export data. Please try again later.');
+                
+                // Restore button state
+                exportBtn.innerHTML = originalText;
+                exportBtn.disabled = false;
+            });
+        }
+        
+        // Global variables to store current category and date for export
+        let currentCategory = '';
+        let currentDate = '';
         
         // Function to show reviews for a category
         function showReviews(category, date) {
+            // Store current category and date for export functionality
+            currentCategory = category;
+            currentDate = date;
+            
             // Show loading inside modal
             document.getElementById('modalTitle').textContent = `Loading ${category} Reviews...`;
             document.getElementById('reviewContainer').innerHTML = '<div class="spinner"></div><p>Loading reviews...</p>';
@@ -271,7 +352,9 @@
                 // Add reviews to container
                 if (data.reviews.length === 0) {
                     container.innerHTML = '<p>No reviews found for this category.</p>';
+                    document.getElementById('exportCategoryButton').style.display = 'none';
                 } else {
+                    document.getElementById('exportCategoryButton').style.display = 'inline-block';
                     data.reviews.forEach(review => {
                         const reviewElement = document.createElement('div');
                         reviewElement.className = 'review-item';

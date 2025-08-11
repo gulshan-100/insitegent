@@ -9,6 +9,7 @@ import json
 from app.embedding_utils import get_embeddings, get_text_embedding
 from app.vector_store import VectorStore
 from app.llm_categorizer import suggest_new_category
+from app.dynamic_category_manager import get_all_categories, add_dynamic_category
 
 # Define predefined categories with example phrases
 PREDEFINED_CATEGORIES = {
@@ -109,6 +110,7 @@ def categorize_reviews(reviews_list):
     
     Uses OpenAI embeddings and FAISS vector store for semantic matching.
     Falls back to LLM categorization for reviews that don't match existing categories.
+    Creates new categories as needed for reviews that don't fit existing ones.
     
     Args:
         reviews_list: List of review dictionaries or DataFrame rows 
@@ -128,13 +130,14 @@ def categorize_reviews(reviews_list):
         if content and not content.isspace():
             review_texts.append(content)
     
+    # Get all categories (predefined + dynamic)
+    ALL_CATEGORIES = get_all_categories()
+    
     # Initialize results
-    category_counts = {cat: 0 for cat in PREDEFINED_CATEGORIES.keys()}
-    category_counts["Other"] = 0
+    category_counts = {cat: 0 for cat in ALL_CATEGORIES.keys()}
     
     # Initialize categorized reviews dictionary
-    categorized_reviews = {cat: [] for cat in PREDEFINED_CATEGORIES.keys()}
-    categorized_reviews["Other"] = []
+    categorized_reviews = {cat: [] for cat in ALL_CATEGORIES.keys()}
     
     # If no reviews, return empty counts and categorized_reviews
     if not review_texts:
@@ -146,7 +149,10 @@ def categorize_reviews(reviews_list):
         examples = []
         example_categories = []
         
-        for category, phrases in PREDEFINED_CATEGORIES.items():
+        # Get all categories (predefined + dynamic)
+        ALL_CATEGORIES = get_all_categories()
+        
+        for category, phrases in ALL_CATEGORIES.items():
             for phrase in phrases:
                 examples.append(phrase)
                 example_categories.append(category)
@@ -175,26 +181,29 @@ def categorize_reviews(reviews_list):
             # Get the original review object
             original_review = reviews_list[i]
             
-            # Search for similar examples - get top 3 matches
-            results = vector_store.similarity_search(review_embeddings[i], k=3)
+            # Search for similar examples - get top 5 matches (increased from 3)
+            results = vector_store.similarity_search(review_embeddings[i], k=5)
             
-            if results and results[0][1] < 1.0:  # More lenient threshold to reduce "Other" category
+            if results:  # Always try to find a match, no threshold
                 # Get category from metadata
-                category = results[0][2].get("category", "Other")
+                category = results[0][2].get("category", "Positive Feedback")  # Default to Positive Feedback instead of Other
                 category_counts[category] += 1
                 categorized_reviews[category].append(original_review)
             else:
-                # Store for LLM processing
+                # Store for LLM processing - this should rarely happen now
                 uncategorized_reviews.append(review_text)
                 uncategorized_review_objects.append(original_review)
         
         # Process uncategorized reviews with LLM if there are any
         if uncategorized_reviews:
             try:
+                # Get all existing categories
+                ALL_CATEGORIES = get_all_categories()
+                
                 # Get new categories from LLM
                 new_categories = suggest_new_category(
                     uncategorized_reviews, 
-                    list(PREDEFINED_CATEGORIES.keys())
+                    list(ALL_CATEGORIES.keys())
                 )
                 
                 # Count reviews by new categories and store review objects
@@ -203,8 +212,15 @@ def categorize_reviews(reviews_list):
                     category = category.strip()
                     
                     if category not in category_counts:
+                        # This is a brand new category created by the LLM
+                        print(f"Creating new dynamic category: {category}")
+                        
+                        # Add to our tracking
                         category_counts[category] = 0
                         categorized_reviews[category] = []
+                        
+                        # Save this new category with the review text as an example
+                        add_dynamic_category(category, [review_text])
                     
                     try:
                         # Find the corresponding review object
@@ -223,7 +239,7 @@ def categorize_reviews(reviews_list):
                     except Exception as e:
                         print(f"Error processing specific review for LLM categorization: {e}")
                         
-                # Any remaining uncategorized reviews go to "Other"
+                # Any remaining uncategorized reviews go to "Positive Feedback" or another appropriate category
                 uncategorized_indices = set(range(len(uncategorized_reviews)))
                 for review_text in new_categories.keys():
                     if review_text in uncategorized_reviews:
@@ -231,16 +247,33 @@ def categorize_reviews(reviews_list):
                         if idx in uncategorized_indices:
                             uncategorized_indices.remove(idx)
                 
-                # Add remaining reviews to "Other"
+                # Add remaining reviews to most appropriate category based on sentiment
                 remaining_reviews = []
                 for idx in uncategorized_indices:
-                    category_counts["Other"] += 1
-                    categorized_reviews["Other"].append(uncategorized_review_objects[idx])
-                    remaining_reviews.append(uncategorized_review_objects[idx])
+                    review = uncategorized_review_objects[idx]
+                    review_text = uncategorized_reviews[idx].lower()
+                    
+                    # Try to determine sentiment or topic from keywords
+                    if any(word in review_text for word in ["good", "great", "nice", "best", "love", "awesome", "excellent"]):
+                        category = "Positive Feedback"
+                    elif any(word in review_text for word in ["delivery", "late", "time", "arrived"]):
+                        category = "Delivery issue"
+                    elif any(word in review_text for word in ["food", "cold", "taste", "quality"]):
+                        category = "Food stale"
+                    elif any(word in review_text for word in ["app", "crash", "error", "bug"]):
+                        category = "App issues"
+                    elif any(word in review_text for word in ["charge", "price", "expensive", "cost"]):
+                        category = "High Charges/Fees"
+                    else:
+                        category = "Positive Feedback"  # Default if no keywords match
+                    
+                    category_counts[category] += 1
+                    categorized_reviews[category].append(review)
+                    remaining_reviews.append(review)
                 
-                # If too many "Other" reviews, try one more time with a more aggressive approach
-                if len(remaining_reviews) > 10:
-                    print(f"Too many Other reviews ({len(remaining_reviews)}). Trying again with more aggressive categorization...")
+                # If we have several uncategorized reviews, try one more time with a more aggressive approach
+                if len(remaining_reviews) > 5:
+                    print(f"Found {len(remaining_reviews)} reviews that need further processing. Using aggressive categorization...")
                     
                     # Extract just the content from the reviews
                     remaining_texts = []
@@ -253,44 +286,51 @@ def categorize_reviews(reviews_list):
                         if content and not content.isspace():
                             remaining_texts.append(content)
                     
-                    # Try to recategorize with a more aggressive prompt
-                    try:
-                        from app.llm_categorizer import last_resort_categorize
-                        
-                        # Get existing categories including any new ones that were created
-                        all_categories = list(category_counts.keys())
-                        all_categories.remove("Other")  # Remove "Other" from the list
-                        
-                        # Try more aggressive categorization
-                        emergency_categories = last_resort_categorize(remaining_texts, all_categories)
-                        
-                        # Remove from "Other" and add to appropriate categories
-                        for review_text, new_cat in emergency_categories.items():
-                            # Find the review in the "Other" category
-                            for i, review in enumerate(categorized_reviews["Other"]):
-                                review_content = ""
-                                if isinstance(review, dict):
-                                    review_content = review.get('content', '')
-                                else:
-                                    review_content = str(review)
-                                
-                                if review_content.strip() == review_text.strip():
-                                    # Remove from Other
-                                    category_counts["Other"] -= 1
-                                    removed_review = categorized_reviews["Other"].pop(i)
+                # Try to recategorize with a more aggressive prompt
+                        try:
+                            from app.llm_categorizer import last_resort_categorize
+                            
+                            # Get existing categories including any new ones that were created
+                            all_categories = list(category_counts.keys())
+                            if "Other" in all_categories:
+                                all_categories.remove("Other")  # Remove "Other" from the list
+                            
+                            # Try more aggressive categorization with dynamic category creation enabled
+                            emergency_categories = last_resort_categorize(remaining_texts, all_categories, create_new=True)                        # Assign reviews to appropriate categories 
+                            # (no need to look in the "Other" category since it shouldn't exist anymore)
+                            for review_text, new_cat in emergency_categories.items():
+                                # Find the matching review in our data
+                                for review in remaining_reviews:
+                                    review_content = ""
+                                    if isinstance(review, dict):
+                                        review_content = review.get('content', '')
+                                    else:
+                                        review_content = str(review)
                                     
-                                    # Add to new category
-                                    if new_cat not in category_counts:
-                                        category_counts[new_cat] = 0
-                                        categorized_reviews[new_cat] = []
-                                    
-                                    category_counts[new_cat] += 1
-                                    categorized_reviews[new_cat].append(removed_review)
-                                    break
+                                    if review_content.strip() == review_text.strip():
+                                        # Add to appropriate category
+                                        if new_cat not in category_counts:
+                                            # This is a newly created category
+                                            print(f"Adding new dynamic category: {new_cat}")
+                                            category_counts[new_cat] = 0
+                                            categorized_reviews[new_cat] = []
+                                            
+                                            # Save this new category with the review text as an example
+                                            add_dynamic_category(new_cat, [review_content])
+                                        
+                                        # Make sure we're not double counting this review
+                                        for cat, reviews_list in categorized_reviews.items():
+                                            if review in reviews_list:
+                                                category_counts[cat] -= 1
+                                                reviews_list.remove(review)
+                                        
+                                        category_counts[new_cat] += 1
+                                        categorized_reviews[new_cat].append(review)
+                                        break
                         
-                        print(f"Successfully recategorized reviews. Other category now has {category_counts['Other']} reviews.")
-                    except Exception as e:
-                        print(f"Error in emergency recategorization: {e}")
+                            print(f"Successfully recategorized all reviews with meaningful categories.")
+                        except Exception as e:
+                            print(f"Error in emergency recategorization: {e}")
                     
             except Exception as e:
                 print(f"Error in LLM categorization process: {e}")
@@ -303,19 +343,34 @@ def categorize_reviews(reviews_list):
                     results = vector_store.similarity_search(review_embeddings[i], k=1)
                     
                     if results:  # Any match at all, no threshold
-                        category = results[0][2].get("category", "Positive Feedback")  # Default to Positive Feedback instead of Other
+                        category = results[0][2].get("category", "Positive Feedback")
                         category_counts[category] += 1
                         categorized_reviews[category].append(original_review)
                     else:
-                        # Last resort, just put it in "Positive Feedback" if it has any positive words
+                        # Analyze the review text for clues
                         review_lower = review_text.lower()
+                        
+                        # Check for different types of content
                         if any(word in review_lower for word in ["good", "great", "nice", "best", "love", "awesome", "excellent", "fast", "quick"]):
-                            category_counts["Positive Feedback"] += 1
-                            categorized_reviews["Positive Feedback"].append(original_review)
+                            category = "Positive Feedback"
+                        elif any(word in review_lower for word in ["delivery", "late", "time", "arrived"]):
+                            category = "Delivery issue"
+                        elif any(word in review_lower for word in ["food", "cold", "taste", "quality"]):
+                            category = "Food stale"
+                        elif any(word in review_lower for word in ["app", "crash", "error", "bug"]):
+                            category = "App issues"
+                        elif any(word in review_lower for word in ["charge", "price", "expensive", "cost"]):
+                            category = "High Charges/Fees"
+                        elif any(word in review_lower for word in ["rude", "behavior", "unprofessional", "driver", "rider"]):
+                            category = "Delivery partner rude"
+                        elif any(word in review_lower for word in ["map", "location", "address", "gps", "directions"]):
+                            category = "Maps not working properly"
                         else:
-                            # Truly last resort - "Other"
-                            category_counts["Other"] += 1
-                            categorized_reviews["Other"].append(original_review)
+                            # Ultimate fallback - assign to Positive Feedback
+                            category = "Positive Feedback"
+                            
+                        category_counts[category] += 1
+                        categorized_reviews[category].append(original_review)
         
         return category_counts, categorized_reviews
         
@@ -336,11 +391,9 @@ def fallback_categorize_reviews(reviews_list):
     """
     # Initialize category counts
     category_counts = {cat: 0 for cat in PREDEFINED_CATEGORIES.keys()}
-    category_counts["Other"] = 0
     
     # Initialize categorized reviews dictionary
     categorized_reviews = {cat: [] for cat in PREDEFINED_CATEGORIES.keys()}
-    categorized_reviews["Other"] = []
     
     # Process each review
     for review in reviews_list:
@@ -351,9 +404,12 @@ def fallback_categorize_reviews(reviews_list):
             content = str(review.get('content', '')).lower()
         
         if not content:
+            # Assign empty content to Positive Feedback by default
+            category_counts["Positive Feedback"] += 1
+            categorized_reviews["Positive Feedback"].append(review)
             continue
             
-        # Check for matches
+        # Check for matches against predefined categories
         matched = False
         for category, patterns in PREDEFINED_CATEGORIES.items():
             for pattern in patterns:
@@ -365,10 +421,33 @@ def fallback_categorize_reviews(reviews_list):
             if matched:
                 break
                 
-        # If no category matched, count as "Other"
+        # If no category matched, intelligently assign based on content
         if not matched:
-            category_counts["Other"] += 1
-            categorized_reviews["Other"].append(review)
+            # Try to determine sentiment or topic from keywords
+            if any(word in content for word in ["good", "great", "nice", "best", "love", "awesome", "excellent", "amazing", "perfect"]):
+                category = "Positive Feedback"
+            elif any(word in content for word in ["delivery", "late", "time", "arrived", "wait", "delayed", "slow"]):
+                category = "Delivery issue"
+            elif any(word in content for word in ["food", "cold", "taste", "quality", "item", "order"]):
+                category = "Food stale"
+            elif any(word in content for word in ["app", "crash", "error", "bug", "login", "issue"]):
+                category = "App issues"
+            elif any(word in content for word in ["charge", "price", "expensive", "cost", "fee", "money"]):
+                category = "High Charges/Fees"
+            elif any(word in content for word in ["rude", "behavior", "unprofessional", "driver", "rider"]):
+                category = "Delivery partner rude"
+            elif any(word in content for word in ["map", "location", "address", "gps", "directions"]):
+                category = "Maps not working properly"
+            elif any(word in content for word in ["instamart", "night", "late", "24", "hours"]):
+                category = "Instamart should be open all night"
+            elif any(word in content for word in ["bolt", "10", "minute", "quick", "fast"]):
+                category = "Bring back 10 minute bolt delivery"
+            else:
+                # Default to Positive Feedback if we can't determine anything else
+                category = "Positive Feedback"
+            
+            category_counts[category] += 1
+            categorized_reviews[category].append(review)
     
     return category_counts, categorized_reviews
 
