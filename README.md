@@ -117,3 +117,5 @@ The project is organized into modular components:
 - OpenAI for embeddings and LLM categorization
 - Pandas for data processing
 - Python-dotenv for environment management
+- Google Play Scrapper
+- Langchain
